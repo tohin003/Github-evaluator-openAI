@@ -157,9 +157,9 @@ const HERO_METRICS = [
   },
   {
     icon: Github,
-    value: 'Top 5',
-    label: 'Repositories reviewed',
-    description: 'The analysis focuses on recent, non-fork repositories to keep the signal grounded.',
+    value: 'Up to 6',
+    label: 'Representative repos',
+    description: 'The analysis prefers role-relevant repositories and only falls back to general projects when the profile is sparse.',
   },
   {
     icon: Zap,

@@ -87,6 +87,18 @@ export interface GitHubProfileData {
 
 const GITHUB_API_BASE = 'https://api.github.com';
 const MAX_DEEP_REPOS = 6;
+const MIN_ROLE_MATCHED_REPOS = 3;
+const ROLE_STOPWORDS = new Set([
+  'developer',
+  'engineer',
+  'software',
+  'application',
+  'applications',
+  'specialist',
+  'lead',
+  'senior',
+  'junior',
+]);
 
 const ROLE_SIGNAL_MAP: Record<string, string[]> = {
   frontend: ['frontend', 'react', 'next', 'javascript', 'typescript', 'ui', 'css', 'tailwind', 'web'],
@@ -95,6 +107,7 @@ const ROLE_SIGNAL_MAP: Record<string, string[]> = {
   data: ['data', 'python', 'pandas', 'numpy', 'ml', 'machine', 'learning', 'analytics', 'ai', 'jupyter'],
   mobile: ['mobile', 'android', 'ios', 'react-native', 'flutter', 'swift', 'kotlin'],
   devops: ['devops', 'docker', 'kubernetes', 'terraform', 'aws', 'ci', 'cd', 'infra', 'deployment'],
+  genai: ['ai', 'llm', 'agent', 'rag', 'prompt', 'embedding', 'vector', 'langchain', 'openai', 'gemini', 'anthropic', 'inference', 'transformer', 'python'],
 };
 
 function getHeaders(token?: string): HeadersInit {
@@ -245,7 +258,7 @@ function getRoleSignals(targetRole: string): string[] {
     loweredRole
       .split(/[^a-z0-9+#.]+/)
       .map((token) => token.trim())
-      .filter((token) => token.length > 2)
+      .filter((token) => token.length > 2 && !ROLE_STOPWORDS.has(token))
   );
 
   if (loweredRole.includes('front')) {
@@ -270,6 +283,15 @@ function getRoleSignals(targetRole: string): string[] {
 
   if (loweredRole.includes('devops') || loweredRole.includes('platform') || loweredRole.includes('infra')) {
     ROLE_SIGNAL_MAP.devops.forEach((signal) => signals.add(signal));
+  }
+
+  if (
+    loweredRole.includes('gen ai') ||
+    loweredRole.includes('generative') ||
+    loweredRole.includes('llm') ||
+    loweredRole.includes('agent')
+  ) {
+    ROLE_SIGNAL_MAP.genai.forEach((signal) => signals.add(signal));
   }
 
   return Array.from(signals);
@@ -297,8 +319,7 @@ function getRoleMatchScore(repo: GitHubRepo, roleSignals: string[]): number {
 
 function selectReposForAnalysis(repos: GitHubRepo[], targetRole: string): GitHubRepo[] {
   const roleSignals = getRoleSignals(targetRole);
-
-  return repos
+  const rankedRepos = repos
     .map((repo, index) => {
       const recencyScore = Math.max(0, 24 - index * 1.75);
       const starScore = Math.min(repo.stargazers_count * 4, 24);
@@ -309,10 +330,12 @@ function selectReposForAnalysis(repos: GitHubRepo[], targetRole: string): GitHub
         Math.min(repo.topics.length * 2, 10) +
         (repo.license ? 2 : 0) +
         (repo.has_issues ? 2 : 0);
-      const roleScore = getRoleMatchScore(repo, roleSignals) * 6;
+      const roleMatchScore = getRoleMatchScore(repo, roleSignals);
+      const roleScore = roleMatchScore * 6;
 
       return {
         repo,
+        roleMatchScore,
         score: recencyScore + starScore + forkScore + sizeScore + metadataScore + roleScore,
       };
     })
@@ -320,9 +343,19 @@ function selectReposForAnalysis(repos: GitHubRepo[], targetRole: string): GitHub
       (a, b) =>
         b.score - a.score ||
         new Date(b.repo.pushed_at).getTime() - new Date(a.repo.pushed_at).getTime()
-    )
-    .slice(0, MAX_DEEP_REPOS)
-    .map(({ repo }) => repo);
+    );
+
+  if (!roleSignals.length) {
+    return rankedRepos.slice(0, MAX_DEEP_REPOS).map(({ repo }) => repo);
+  }
+
+  const roleMatchedRepos = rankedRepos.filter((repo) => repo.roleMatchScore > 0);
+
+  if (roleMatchedRepos.length >= MIN_ROLE_MATCHED_REPOS) {
+    return roleMatchedRepos.slice(0, MAX_DEEP_REPOS).map(({ repo }) => repo);
+  }
+
+  return rankedRepos.slice(0, MAX_DEEP_REPOS).map(({ repo }) => repo);
 }
 
 function toPortfolioRepoSummary(repo: GitHubRepo): PortfolioRepoSummary {
