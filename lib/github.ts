@@ -1,5 +1,5 @@
 // GitHub API Client
-// Fetches profile data and selects representative repositories for deep analysis.
+// Builds evidence-rich repository snapshots for grounded portfolio analysis.
 
 interface GitHubUser {
   login: string;
@@ -54,13 +54,40 @@ interface GitHubCommit {
   };
 }
 
+export interface RepoFileSnippet {
+  path: string;
+  content: string;
+}
+
+export interface EvidenceFile extends RepoFileSnippet {
+  kind: 'manifest' | 'workflow' | 'infra' | 'schema' | 'test' | 'config';
+}
+
+export interface DeterministicSignal {
+  present: boolean;
+  summary: string;
+  evidencePaths: string[];
+}
+
+export interface RepoSignals {
+  tests: DeterministicSignal;
+  apiUsage: DeterministicSignal;
+  docker: DeterministicSignal;
+  ci: DeterministicSignal;
+  database: DeterministicSignal;
+  ai: DeterministicSignal;
+  detectedTechnologies: string[];
+}
+
 export interface RepoData {
   repo: GitHubRepo;
   readme: string | null;
   fileTree: string[];
-  sampleFiles: { path: string; content: string }[];
+  sampleFiles: RepoFileSnippet[];
+  evidenceFiles: EvidenceFile[];
   recentCommits: GitHubCommit[];
   languages: Record<string, number>;
+  signals: RepoSignals;
 }
 
 export interface PortfolioRepoSummary {
@@ -87,7 +114,13 @@ export interface GitHubProfileData {
 
 const GITHUB_API_BASE = 'https://api.github.com';
 const MAX_DEEP_REPOS = 6;
+const MAX_CODE_SAMPLE_FILES = 6;
+const MAX_EVIDENCE_FILES = 8;
+const MAX_FILE_TREE_ITEMS = 1200;
+const MAX_SAMPLE_FILE_CHARS = 5000;
+const MAX_EVIDENCE_FILE_CHARS = 2500;
 const MIN_ROLE_MATCHED_REPOS = 3;
+
 const ROLE_STOPWORDS = new Set([
   'developer',
   'engineer',
@@ -98,6 +131,7 @@ const ROLE_STOPWORDS = new Set([
   'lead',
   'senior',
   'junior',
+  'associate',
 ]);
 
 const ROLE_SIGNAL_MAP: Record<string, string[]> = {
@@ -109,6 +143,223 @@ const ROLE_SIGNAL_MAP: Record<string, string[]> = {
   devops: ['devops', 'docker', 'kubernetes', 'terraform', 'aws', 'ci', 'cd', 'infra', 'deployment'],
   genai: ['ai', 'llm', 'agent', 'rag', 'prompt', 'embedding', 'vector', 'langchain', 'openai', 'gemini', 'anthropic', 'inference', 'transformer', 'python'],
 };
+
+const CODE_PRIORITY_PATTERNS = [
+  /^src\//,
+  /^app\//,
+  /^lib\//,
+  /^server\//,
+  /^api\//,
+  /^pages\//,
+  /^components\//,
+  /^backend\//,
+  /^frontend\//,
+  /^agents?\//,
+  /^services?\//,
+];
+
+const CODE_EXTENSIONS = [
+  '.ts', '.tsx', '.js', '.jsx', '.py', '.java', '.go', '.rs',
+  '.rb', '.php', '.cs', '.cpp', '.c', '.swift', '.kt',
+];
+
+const CODE_KEYWORD_PATTERNS = [
+  /agent/i,
+  /assistant/i,
+  /prompt/i,
+  /vector/i,
+  /embed/i,
+  /rag/i,
+  /api/i,
+  /route/i,
+  /server/i,
+  /model/i,
+  /tool/i,
+  /worker/i,
+  /planner/i,
+  /service/i,
+  /db/i,
+];
+
+const MANIFEST_PATTERNS = [
+  /^package\.json$/,
+  /^pnpm-workspace\.yaml$/,
+  /^requirements[^/]*\.txt$/,
+  /^pyproject\.toml$/,
+  /^Pipfile$/,
+  /^poetry\.lock$/,
+  /^environment\.ya?ml$/,
+  /^go\.mod$/,
+  /^Cargo\.toml$/,
+  /^pom\.xml$/,
+  /^build\.gradle(\.kts)?$/,
+  /^Gemfile$/,
+  /^composer\.json$/,
+];
+
+const WORKFLOW_PATTERNS = [
+  /^\.github\/workflows\/.+\.(yml|yaml)$/,
+  /^\.gitlab-ci\.yml$/,
+  /^\.circleci\/config\.yml$/,
+  /^Jenkinsfile$/,
+];
+
+const INFRA_EVIDENCE_PATTERNS = [
+  /^Dockerfile$/,
+  /^Dockerfile\./,
+  /^Containerfile$/,
+  /^docker-compose\.ya?ml$/,
+  /^k8s\//,
+  /^helm\//,
+  /^terraform\//,
+  /^infra\//,
+  /^render\.ya?ml$/,
+  /^vercel\.json$/,
+];
+
+const DOCKER_PATTERNS = [
+  /^Dockerfile$/,
+  /^Dockerfile\./,
+  /^Containerfile$/,
+  /^docker-compose\.ya?ml$/,
+  /^k8s\//,
+  /^helm\//,
+];
+
+const SCHEMA_PATTERNS = [
+  /^prisma\/schema\.prisma$/,
+  /schema\.sql$/i,
+  /^db\//,
+  /^migrations\//,
+];
+
+const TEST_FILE_PATTERNS = [
+  /(^|\/)__tests__\//i,
+  /(^|\/)tests?\//i,
+  /\.test\./i,
+  /\.spec\./i,
+  /^conftest\.py$/i,
+  /^pytest\.ini$/i,
+  /^playwright\.config\./i,
+  /^cypress\.config\./i,
+  /^vitest\.config\./i,
+  /^jest\.config\./i,
+];
+
+const API_PATH_PATTERNS = [
+  /^app\/api\//,
+  /^src\/app\/api\//,
+  /^pages\/api\//,
+  /^src\/pages\/api\//,
+  /(^|\/)routes?\//,
+  /(^|\/)controllers?\//,
+  /(^|\/)server\//,
+  /^src\/server\//,
+];
+
+const API_CONTENT_PATTERNS = [
+  /\bfetch\s*\(/,
+  /\baxios\b/,
+  /\bhttpx\b/,
+  /\brequests\./,
+  /\bNextRequest\b/,
+  /\bNextResponse\b/,
+  /\bAPIRouter\b/,
+  /\brouter\.(get|post|put|delete|patch)\b/,
+  /\bapp\.(get|post|put|delete|patch)\b/,
+  /\bclient\.chat\.completions\b/,
+];
+
+const TEST_CONTENT_PATTERNS = [
+  /\bdescribe\s*\(/,
+  /\bit\s*\(/,
+  /\btest\s*\(/,
+  /\bexpect\s*\(/,
+  /\bpytest\b/,
+  /\bjest\b/,
+  /\bvitest\b/,
+  /\bplaywright\b/,
+  /\bcypress\b/,
+  /\bmocha\b/,
+  /\bunittest\b/,
+];
+
+const DATABASE_CONTENT_PATTERNS = [
+  /\bprisma\b/i,
+  /\bmongoose\b/i,
+  /\bmongodb\b/i,
+  /\bpostgres\b/i,
+  /\bmysql\b/i,
+  /\bsqlite\b/i,
+  /\bsupabase\b/i,
+  /\bfirebase\b/i,
+  /\bsequelize\b/i,
+  /\bdrizzle\b/i,
+  /\btypeorm\b/i,
+  /\bsqlalchemy\b/i,
+  /\bpsycopg\b/i,
+  /\bpg\b/i,
+];
+
+const AI_CONTENT_PATTERNS = [
+  /\bopenai\b/i,
+  /\bgemini\b/i,
+  /\banthropic\b/i,
+  /\blangchain\b/i,
+  /\bllamaindex\b/i,
+  /\bollama\b/i,
+  /\btransformers\b/i,
+  /\bhuggingface\b/i,
+  /\bembedding/i,
+  /\bvector\b/i,
+  /\brag\b/i,
+  /\bprompt\b/i,
+  /\bqdrant\b/i,
+  /\bpinecone\b/i,
+  /\bchroma\b/i,
+  /\bfaiss\b/i,
+];
+
+const TECHNOLOGY_MARKERS = [
+  { label: 'Next.js', patterns: [/\bnext\b/i, /next\/server/i, /^app\//i] },
+  { label: 'React', patterns: [/\breact\b/i, /\.tsx?$/i] },
+  { label: 'TypeScript', patterns: [/\btypescript\b/i, /\.tsx?$/i] },
+  { label: 'Tailwind CSS', patterns: [/\btailwindcss\b/i] },
+  { label: 'OpenAI', patterns: [/\bopenai\b/i] },
+  { label: 'Gemini', patterns: [/\bgemini\b/i, /generativelanguage/i, /GoogleGenerativeAI/i] },
+  { label: 'Anthropic', patterns: [/\banthropic\b/i] },
+  { label: 'LangChain', patterns: [/\blangchain\b/i] },
+  { label: 'LlamaIndex', patterns: [/\bllamaindex\b/i] },
+  { label: 'Python', patterns: [/\.py$/i, /\bpython\b/i] },
+  { label: 'FastAPI', patterns: [/\bfastapi\b/i] },
+  { label: 'Flask', patterns: [/\bflask\b/i] },
+  { label: 'Express', patterns: [/\bexpress\b/i] },
+  { label: 'NestJS', patterns: [/\bnestjs\b/i] },
+  { label: 'Prisma', patterns: [/\bprisma\b/i] },
+  { label: 'PostgreSQL', patterns: [/\bpostgres\b/i, /\bpg\b/i] },
+  { label: 'MongoDB', patterns: [/\bmongodb\b/i, /\bmongoose\b/i] },
+  { label: 'Supabase', patterns: [/\bsupabase\b/i] },
+  { label: 'Firebase', patterns: [/\bfirebase\b/i] },
+  { label: 'Docker', patterns: [/Dockerfile/i, /\bdocker\b/i] },
+  { label: 'GitHub Actions', patterns: [/\.github\/workflows\//i] },
+  { label: 'Playwright', patterns: [/\bplaywright\b/i] },
+  { label: 'Vitest', patterns: [/\bvitest\b/i] },
+  { label: 'Jest', patterns: [/\bjest\b/i] },
+  { label: 'Pytest', patterns: [/\bpytest\b/i] },
+  { label: 'Electron', patterns: [/\belectron\b/i] },
+  { label: 'Qdrant', patterns: [/\bqdrant\b/i] },
+  { label: 'Pinecone', patterns: [/\bpinecone\b/i] },
+  { label: 'Chroma', patterns: [/\bchroma\b/i] },
+  { label: 'Transformers', patterns: [/\btransformers\b/i] },
+];
+
+function unique<T>(items: T[]): T[] {
+  return [...new Set(items)];
+}
+
+function matchesAny(value: string, patterns: RegExp[]): boolean {
+  return patterns.some((pattern) => pattern.test(value));
+}
 
 function getHeaders(token?: string): HeadersInit {
   const headers: HeadersInit = {
@@ -143,6 +394,10 @@ async function fetchGitHub<T>(path: string, token?: string): Promise<T> {
   return response.json();
 }
 
+function isProbablyTextContent(content: string): boolean {
+  return !content.includes('\u0000');
+}
+
 async function fetchFileContent(
   owner: string,
   repo: string,
@@ -156,13 +411,31 @@ async function fetchFileContent(
     );
 
     if (data.content && data.encoding === 'base64') {
-      return Buffer.from(data.content, 'base64').toString('utf-8');
+      const decoded = Buffer.from(data.content, 'base64').toString('utf-8');
+      return isProbablyTextContent(decoded) ? decoded : null;
     }
 
     return null;
   } catch {
     return null;
   }
+}
+
+async function fetchReadmeContent(
+  owner: string,
+  repo: string,
+  token?: string
+): Promise<string | null> {
+  const readmeCandidates = ['README.md', 'readme.md', 'README.MD', 'README', 'README.txt'];
+
+  for (const candidate of readmeCandidates) {
+    const content = await fetchFileContent(owner, repo, candidate, token);
+    if (content) {
+      return content;
+    }
+  }
+
+  return null;
 }
 
 async function fetchRepoTree(
@@ -179,77 +452,10 @@ async function fetchRepoTree(
     return data.tree
       .filter((item) => item.type === 'blob')
       .map((item) => item.path)
-      .slice(0, 200);
+      .slice(0, MAX_FILE_TREE_ITEMS);
   } catch {
     return [];
   }
-}
-
-function selectSampleFiles(files: string[], language: string | null): string[] {
-  const priorityPatterns = [
-    /^src\//,
-    /^app\//,
-    /^lib\//,
-    /^server\//,
-    /^api\//,
-    /^pages\//,
-    /^components\//,
-  ];
-
-  const codeExtensions = [
-    '.ts', '.tsx', '.js', '.jsx', '.py', '.java', '.go', '.rs',
-    '.rb', '.php', '.cs', '.cpp', '.c', '.swift', '.kt',
-  ];
-
-  const configFiles = [
-    'Dockerfile',
-    'docker-compose.yml',
-    'docker-compose.yaml',
-    '.github/workflows',
-    'Makefile',
-    'Jenkinsfile',
-    'jest.config',
-    'vitest.config',
-    'tsconfig.json',
-    'package.json',
-  ];
-
-  const codeFiles = files.filter((file) =>
-    codeExtensions.some((extension) => file.endsWith(extension))
-  );
-
-  const scored = codeFiles.map((file) => {
-    let score = 0;
-
-    if (priorityPatterns.some((pattern) => pattern.test(file))) score += 10;
-    if (file.includes('test') || file.includes('spec')) score += 5;
-    if (file.includes('index') || file.includes('main') || file.includes('app')) score += 3;
-
-    if (language) {
-      const langExtMap: Record<string, string[]> = {
-        TypeScript: ['.ts', '.tsx'],
-        JavaScript: ['.js', '.jsx'],
-        Python: ['.py'],
-        Java: ['.java'],
-        Go: ['.go'],
-        Rust: ['.rs'],
-      };
-
-      const extensions = langExtMap[language] || [];
-      if (extensions.some((extension) => file.endsWith(extension))) score += 2;
-    }
-
-    return { path: file, score };
-  });
-
-  scored.sort((a, b) => b.score - a.score);
-
-  const selectedCode = scored.slice(0, 5).map((item) => item.path);
-  const selectedConfig = files
-    .filter((file) => configFiles.some((config) => file.includes(config)))
-    .slice(0, 2);
-
-  return [...new Set([...selectedCode, ...selectedConfig])].slice(0, 7);
 }
 
 function getRoleSignals(targetRole: string): string[] {
@@ -358,6 +564,218 @@ function selectReposForAnalysis(repos: GitHubRepo[], targetRole: string): GitHub
   return rankedRepos.slice(0, MAX_DEEP_REPOS).map(({ repo }) => repo);
 }
 
+function selectCodeSampleFiles(
+  files: string[],
+  language: string | null,
+  targetRole: string
+): string[] {
+  const roleSignals = getRoleSignals(targetRole);
+  const codeFiles = files.filter((file) =>
+    CODE_EXTENSIONS.some((extension) => file.endsWith(extension))
+  );
+
+  const scoredFiles = codeFiles
+    .filter((file) => !file.endsWith('.d.ts') && !file.endsWith('.min.js'))
+    .map((file) => {
+      let score = 0;
+
+      if (CODE_PRIORITY_PATTERNS.some((pattern) => pattern.test(file))) score += 12;
+      if (CODE_KEYWORD_PATTERNS.some((pattern) => pattern.test(file))) score += 8;
+      if (file.includes('test') || file.includes('spec')) score += 6;
+      if (file.includes('index') || file.includes('main') || file.includes('app')) score += 3;
+      if (roleSignals.some((signal) => file.toLowerCase().includes(signal))) score += 6;
+
+      if (language) {
+        const languageExtensions: Record<string, string[]> = {
+          TypeScript: ['.ts', '.tsx'],
+          JavaScript: ['.js', '.jsx'],
+          Python: ['.py'],
+          Java: ['.java'],
+          Go: ['.go'],
+          Rust: ['.rs'],
+        };
+
+        const extensions = languageExtensions[language] || [];
+        if (extensions.some((extension) => file.endsWith(extension))) score += 3;
+      }
+
+      return { path: file, score };
+    });
+
+  return scoredFiles
+    .sort((a, b) => b.score - a.score)
+    .slice(0, MAX_CODE_SAMPLE_FILES)
+    .map((item) => item.path);
+}
+
+function getEvidenceKind(path: string): EvidenceFile['kind'] | null {
+  if (matchesAny(path, WORKFLOW_PATTERNS)) return 'workflow';
+  if (matchesAny(path, INFRA_EVIDENCE_PATTERNS)) return 'infra';
+  if (matchesAny(path, SCHEMA_PATTERNS)) return 'schema';
+  if (matchesAny(path, TEST_FILE_PATTERNS)) return 'test';
+  if (matchesAny(path, MANIFEST_PATTERNS)) return 'manifest';
+  if (path === '.env.example' || path === '.env.sample' || path === 'tsconfig.json') return 'config';
+  return null;
+}
+
+function selectEvidenceFiles(files: string[], excludedPaths: string[]): { path: string; kind: EvidenceFile['kind'] }[] {
+  const excluded = new Set(excludedPaths);
+
+  return files
+    .filter((file) => !excluded.has(file))
+    .map((file) => {
+      const kind = getEvidenceKind(file);
+      if (!kind) {
+        return null;
+      }
+
+      const kindScore =
+        kind === 'manifest'
+          ? 24
+          : kind === 'workflow'
+            ? 22
+            : kind === 'infra'
+              ? 21
+              : kind === 'schema'
+                ? 20
+                : kind === 'test'
+                  ? 19
+                  : 16;
+
+      return { path: file, kind, score: kindScore };
+    })
+    .filter((file): file is { path: string; kind: EvidenceFile['kind']; score: number } => Boolean(file))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, MAX_EVIDENCE_FILES)
+    .map(({ path, kind }) => ({ path, kind }));
+}
+
+async function loadRepoFiles(
+  owner: string,
+  repo: string,
+  fileSpecs: { path: string; kind?: EvidenceFile['kind'] }[],
+  token: string | undefined,
+  maxChars: number
+): Promise<Array<{ path: string; content: string; kind: EvidenceFile['kind'] | undefined }>> {
+  const loadedFiles = await Promise.all(
+    fileSpecs.map(async (fileSpec) => {
+      const content = await fetchFileContent(owner, repo, fileSpec.path, token);
+      if (!content) {
+        return null;
+      }
+
+      return {
+        path: fileSpec.path,
+        content: content.substring(0, maxChars),
+        kind: fileSpec.kind,
+      };
+    })
+  );
+
+  const compactFiles = loadedFiles.filter((file) => file !== null) as Array<{
+    path: string;
+    content: string;
+    kind: EvidenceFile['kind'] | undefined;
+  }>;
+
+  return compactFiles;
+}
+
+function collectPathMatches(files: string[], patterns: RegExp[]): string[] {
+  return unique(files.filter((file) => matchesAny(file, patterns))).slice(0, 4);
+}
+
+function collectContentMatches(files: RepoFileSnippet[], patterns: RegExp[]): string[] {
+  return unique(
+    files
+      .filter((file) => patterns.some((pattern) => pattern.test(file.content)))
+      .map((file) => file.path)
+  ).slice(0, 4);
+}
+
+function isTestEvidenceFile(path: string): boolean {
+  return (
+    matchesAny(path, TEST_FILE_PATTERNS) ||
+    matchesAny(path, MANIFEST_PATTERNS) ||
+    path === 'package-lock.json' ||
+    path === 'yarn.lock'
+  );
+}
+
+function buildSignal(label: string, evidencePaths: string[]): DeterministicSignal {
+  if (!evidencePaths.length) {
+    return {
+      present: false,
+      summary: `Insufficient evidence of ${label.toLowerCase()} in inspected files.`,
+      evidencePaths: [],
+    };
+  }
+
+  return {
+    present: true,
+    summary: `${label} detected in ${evidencePaths.join(', ')}.`,
+    evidencePaths,
+  };
+}
+
+function detectTechnologies(
+  fileTree: string[],
+  inspectedFiles: RepoFileSnippet[],
+  language: string | null
+): string[] {
+  const corpus = [
+    ...fileTree,
+    ...inspectedFiles.map((file) => `${file.path}\n${file.content}`),
+    language || '',
+  ].join('\n');
+
+  const technologies = TECHNOLOGY_MARKERS
+    .filter((marker) => marker.patterns.some((pattern) => pattern.test(corpus)))
+    .map((marker) => marker.label);
+
+  return unique([language, ...technologies].filter(Boolean) as string[]).slice(0, 12);
+}
+
+function buildRepoSignals(
+  fileTree: string[],
+  sampleFiles: RepoFileSnippet[],
+  evidenceFiles: EvidenceFile[],
+  language: string | null
+): RepoSignals {
+  const inspectedFiles = [...sampleFiles, ...evidenceFiles];
+  const testInspectableFiles = inspectedFiles.filter((file) => isTestEvidenceFile(file.path));
+
+  const tests = buildSignal('Tests', unique([
+    ...collectPathMatches(fileTree, TEST_FILE_PATTERNS),
+    ...collectContentMatches(testInspectableFiles, TEST_CONTENT_PATTERNS),
+  ]));
+
+  const apiUsage = buildSignal('API usage', unique([
+    ...collectPathMatches(fileTree, API_PATH_PATTERNS),
+    ...collectContentMatches(inspectedFiles, API_CONTENT_PATTERNS),
+  ]));
+
+  const docker = buildSignal('Docker or containerization', collectPathMatches(fileTree, DOCKER_PATTERNS));
+  const ci = buildSignal('CI/CD automation', collectPathMatches(fileTree, WORKFLOW_PATTERNS));
+
+  const database = buildSignal('Database usage', unique([
+    ...collectPathMatches(fileTree, SCHEMA_PATTERNS),
+    ...collectContentMatches(inspectedFiles, DATABASE_CONTENT_PATTERNS),
+  ]));
+
+  const ai = buildSignal('AI or LLM integration', collectContentMatches(inspectedFiles, AI_CONTENT_PATTERNS));
+
+  return {
+    tests,
+    apiUsage,
+    docker,
+    ci,
+    database,
+    ai,
+    detectedTechnologies: detectTechnologies(fileTree, inspectedFiles, language),
+  };
+}
+
 function toPortfolioRepoSummary(repo: GitHubRepo): PortfolioRepoSummary {
   return {
     name: repo.name,
@@ -389,7 +807,7 @@ export async function fetchGitHubProfile(
 
   const repoDataPromises = reposToAnalyze.map(async (repo): Promise<RepoData> => {
     const [readme, fileTree, recentCommits, languages] = await Promise.all([
-      fetchFileContent(username, repo.name, 'README.md', token),
+      fetchReadmeContent(username, repo.name, token),
       fetchRepoTree(username, repo.name, repo.default_branch, token),
       fetchGitHub<GitHubCommit[]>(
         `/repos/${username}/${repo.name}/commits?per_page=30`,
@@ -401,23 +819,39 @@ export async function fetchGitHubProfile(
       ).catch(() => ({})),
     ]);
 
-    const filesToSample = selectSampleFiles(fileTree, repo.language);
-    const sampleFiles: { path: string; content: string }[] = [];
+    const sampleFilePaths = selectCodeSampleFiles(fileTree, repo.language, targetRole);
+    const evidenceFileSpecs = selectEvidenceFiles(fileTree, sampleFilePaths);
 
-    for (const filePath of filesToSample) {
-      const content = await fetchFileContent(username, repo.name, filePath, token);
-      if (content && content.length < 15000) {
-        sampleFiles.push({ path: filePath, content: content.substring(0, 8000) });
-      }
-    }
+    const [sampleFiles, loadedEvidenceFiles] = await Promise.all([
+      loadRepoFiles(
+        username,
+        repo.name,
+        sampleFilePaths.map((path) => ({ path })),
+        token,
+        MAX_SAMPLE_FILE_CHARS
+      ),
+      loadRepoFiles(username, repo.name, evidenceFileSpecs, token, MAX_EVIDENCE_FILE_CHARS),
+    ]);
+
+    const evidenceFiles: EvidenceFile[] = loadedEvidenceFiles
+      .filter((file): file is EvidenceFile => Boolean(file.kind))
+      .map((file) => ({
+        path: file.path,
+        content: file.content,
+        kind: file.kind,
+      }));
+
+    const signals = buildRepoSignals(fileTree, sampleFiles, evidenceFiles, repo.language);
 
     return {
       repo,
       readme,
       fileTree,
       sampleFiles,
+      evidenceFiles,
       recentCommits,
       languages,
+      signals,
     };
   });
 
@@ -431,12 +865,13 @@ export async function fetchGitHubProfile(
 
   allCommitDates.forEach((date) => dayCounts[date.getDay()]++);
 
-  const mostActiveDay = dayNames[dayCounts.indexOf(Math.max(...dayCounts))];
+  const mostActiveDay =
+    dayNames[dayCounts.indexOf(Math.max(...dayCounts))] || 'Insufficient evidence';
 
   return {
     user,
     repos,
-    totalRepos: allRepos.length,
+    totalRepos: filteredRepos.length,
     portfolioCatalog,
     contributionStats: {
       totalCommitsLastYear: allCommitDates.length,
