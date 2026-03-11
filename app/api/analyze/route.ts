@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
         }
 
         // Step 1: Fetch GitHub profile data
-        const profileData = await fetchGitHubProfile(username, githubToken);
+        const profileData = await fetchGitHubProfile(username, githubToken, targetRole);
 
         if (profileData.repos.length === 0) {
             return NextResponse.json(
@@ -49,7 +49,8 @@ export async function POST(request: NextRequest) {
             targetRole,
             username,
             profileData.totalRepos,
-            openAiKey
+            openAiKey,
+            profileData.portfolioCatalog
         );
 
         // Step 3: Return combined result
