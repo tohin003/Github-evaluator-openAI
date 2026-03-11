@@ -326,7 +326,7 @@ function DimensionCard({
           <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[color:var(--muted)]">
             Observed
           </div>
-          <p className="mt-2 text-sm leading-6 text-[color:var(--ink)]">
+          <p className="mt-2 text-sm leading-6 text-[color:var(--ink)] [overflow-wrap:anywhere]">
             {scoreObj.findings[0] || 'No clear positive signal was returned for this dimension.'}
           </p>
         </div>
@@ -341,7 +341,7 @@ function DimensionCard({
           <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[color:var(--muted)]">
             Next move
           </div>
-          <p className="mt-2 text-sm leading-6 text-[color:var(--ink)]">
+          <p className="mt-2 text-sm leading-6 text-[color:var(--ink)] [overflow-wrap:anywhere]">
             {scoreObj.suggestions[0] || 'No immediate follow-up was recommended in the analysis.'}
           </p>
         </div>
@@ -392,10 +392,10 @@ function InsightPanel({
               }}
             >
               <span
-                className="mt-1 h-2 w-2 rounded-full"
+                className="mt-1 h-2 w-2 shrink-0 rounded-full"
                 style={{ backgroundColor: accent }}
               />
-              <span>{item}</span>
+              <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">{item}</span>
             </li>
           )
         )}
@@ -997,7 +997,7 @@ export default function HomePage() {
                                 {repo.stars === 1 ? '' : 's'}
                               </p>
 
-                              <p className="max-w-3xl text-sm leading-7 text-[color:var(--muted)]">
+                              <p className="max-w-3xl text-sm leading-7 text-[color:var(--muted)] [overflow-wrap:anywhere]">
                                 {repo.summary}
                               </p>
                             </div>
@@ -1120,8 +1120,10 @@ export default function HomePage() {
                                       key={`${repo.repoName}-good-${itemIndex}`}
                                       className="flex gap-3 rounded-[18px] border border-white/70 bg-white/70 p-4 text-sm leading-6 text-[color:var(--ink)]"
                                     >
-                                      <span className="mt-1 h-2 w-2 rounded-full bg-[#0f766e]" />
-                                      <span>{item}</span>
+                                      <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-[#0f766e]" />
+                                      <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">
+                                        {item}
+                                      </span>
                                     </li>
                                   ))}
                                 </ul>
@@ -1146,8 +1148,10 @@ export default function HomePage() {
                                       key={`${repo.repoName}-next-${itemIndex}`}
                                       className="flex gap-3 rounded-[18px] border border-white/70 bg-white/70 p-4 text-sm leading-6 text-[color:var(--ink)]"
                                     >
-                                      <span className="mt-1 h-2 w-2 rounded-full bg-[#b45309]" />
-                                      <span>{item}</span>
+                                      <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-[#b45309]" />
+                                      <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">
+                                        {item}
+                                      </span>
                                     </li>
                                   ))}
                                 </ul>
