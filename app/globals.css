@@ -1,0 +1,167 @@
+@import "tailwindcss";
+
+@theme inline {
+  --font-sans: "Avenir Next", "Segoe UI Variable", "Segoe UI", sans-serif;
+  --font-display: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+}
+
+:root {
+  color-scheme: light;
+  --ink: #132033;
+  --muted: #5f6d7d;
+  --line: rgba(19, 32, 51, 0.08);
+  --surface: rgba(255, 255, 255, 0.78);
+  --surface-strong: #fffdf9;
+  --surface-muted: rgba(255, 250, 243, 0.82);
+  --page-start: #f8f4ee;
+  --page-end: #eef3f2;
+  --wash-amber: rgba(222, 173, 117, 0.18);
+  --wash-teal: rgba(71, 124, 126, 0.16);
+}
+
+@keyframes fadeUp {
+  0% {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@layer base {
+  * {
+    border-color: var(--line);
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    min-height: 100vh;
+    background:
+      radial-gradient(circle at top left, rgba(255, 255, 255, 0.8), transparent 28rem),
+      linear-gradient(135deg, var(--page-start) 0%, #f4efe7 42%, var(--page-end) 100%);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background-image:
+      linear-gradient(to right, rgba(19, 32, 51, 0.035) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(19, 32, 51, 0.035) 1px, transparent 1px);
+    background-size: 88px 88px;
+    mask-image: radial-gradient(circle at center, black 0%, transparent 85%);
+    opacity: 0.28;
+  }
+
+  ::selection {
+    background: rgba(195, 90, 41, 0.2);
+    color: var(--ink);
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-display);
+    letter-spacing: -0.03em;
+  }
+}
+
+@layer components {
+  .panel {
+    @apply rounded-[32px] border shadow-[0_24px_80px_-40px_rgba(17,31,48,0.55)] backdrop-blur-xl;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.84) 0%, rgba(255, 255, 255, 0.7) 100%);
+  }
+
+  .panel-muted {
+    background: linear-gradient(180deg, rgba(255, 252, 248, 0.86) 0%, rgba(255, 248, 241, 0.72) 100%);
+  }
+
+  .eyebrow {
+    @apply inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em];
+    background: rgba(195, 90, 41, 0.1);
+    border-color: rgba(195, 90, 41, 0.16);
+    color: #9a4b24;
+  }
+
+  .surface-tag {
+    @apply rounded-full border px-3 py-1 text-xs font-medium text-[color:var(--muted)] transition-colors;
+    background: rgba(255, 255, 255, 0.72);
+    border-color: rgba(19, 32, 51, 0.08);
+  }
+
+  .section-title {
+    @apply font-display text-[2.85rem] font-semibold leading-[1.02] text-[color:var(--ink)] sm:text-[3.5rem];
+  }
+
+  .field-input {
+    @apply w-full rounded-[20px] border px-4 py-3 text-sm text-[color:var(--ink)] outline-none transition duration-200;
+    background: rgba(255, 255, 255, 0.75);
+    border-color: rgba(19, 32, 51, 0.08);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  }
+
+  .field-input::placeholder {
+    color: rgba(95, 109, 125, 0.8);
+  }
+
+  .field-input:focus {
+    border-color: rgba(195, 90, 41, 0.28);
+    box-shadow:
+      0 0 0 4px rgba(195, 90, 41, 0.08),
+      inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  }
+
+  .primary-button {
+    @apply inline-flex items-center justify-center gap-2 rounded-[20px] px-5 py-3 text-sm font-semibold text-white transition duration-200 disabled:cursor-not-allowed disabled:opacity-50;
+    background: linear-gradient(135deg, #132033 0%, #24456c 100%);
+    box-shadow: 0 16px 36px -20px rgba(19, 32, 51, 0.7);
+  }
+
+  .primary-button:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 18px 40px -22px rgba(19, 32, 51, 0.75);
+  }
+
+  .secondary-button {
+    @apply inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium text-[color:var(--ink)] transition duration-200;
+    background: rgba(255, 255, 255, 0.72);
+    border-color: rgba(19, 32, 51, 0.08);
+  }
+
+  .secondary-button:hover {
+    border-color: rgba(195, 90, 41, 0.2);
+    color: #9a4b24;
+  }
+
+  .metric-card {
+    @apply flex flex-col rounded-[22px] border px-4 py-4;
+    background: rgba(255, 255, 255, 0.72);
+    border-color: rgba(19, 32, 51, 0.08);
+  }
+
+  .metric-label {
+    @apply text-[11px] font-semibold uppercase tracking-[0.22em] text-[color:var(--muted)];
+  }
+
+  .metric-value {
+    @apply mt-2 font-display text-2xl font-semibold text-[color:var(--ink)];
+  }
+
+  .motion-enter {
+    animation: fadeUp 700ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+}
